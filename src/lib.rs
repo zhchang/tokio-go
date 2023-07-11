@@ -35,6 +35,33 @@ pub fn init_runtime(profile: u8) {
     }
 }
 
+/// support running a async closure in default or specified tokio runtime
+/// # Example:
+/// using default runtime, without timeout
+/// ```
+/// let r = go!(|tx: Sender<i32>|async move{
+///   ...
+///   tx.send(1);
+/// });
+/// println!("{}",r.unwrap()); //1
+/// ```
+///
+/// using specified runtime (identified by context.profile), with timeout Duration
+///
+/// ```
+/// let r = go!(|tx: Sender<String>|async move{
+///     ...
+///     sleep(Duration::from_secs(2));
+///     tx.send("whocares".to_string());
+/// },
+/// Context{
+///     profile: 1,
+///     timeout: Duration::from_secs(1),
+/// }
+/// );
+/// println!("{:?}",r.is_ok());//false
+/// ```
+
 #[macro_export]
 macro_rules! go {
     (|$x:ident : Sender<$t:ty>|$y:expr) => {
