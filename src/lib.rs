@@ -12,8 +12,8 @@ extern crate lazy_static;
 const RUNTIME_INIT: Option<Runtime> = None;
 
 lazy_static! {
-    static ref RUNTIMES: Arc<RwLock<[Option<Runtime>; 255]>> =
-        Arc::new(RwLock::new([RUNTIME_INIT; 255]));
+    static ref RUNTIMES: Arc<RwLock<[Option<Runtime>; 256]>> =
+        Arc::new(RwLock::new([RUNTIME_INIT; 256]));
 }
 
 #[derive(Debug)]
