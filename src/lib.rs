@@ -2,7 +2,7 @@ pub mod prelude {
     pub use std::sync::{Arc, RwLock};
     pub use tokio::runtime::Runtime;
     pub use tokio::sync::oneshot::{channel, Sender};
-    pub use tokio::time::{sleep, timeout, Duration};
+    pub use tokio::time::{interval, sleep, Duration};
     const RUNTIME_INIT: Option<Runtime> = None;
     lazy_static! {
         pub static ref RUNTIMES: Arc<RwLock<[Option<Runtime>; 256]>> =
@@ -38,7 +38,7 @@ pub mod prelude {
 /// let r = go!(|tx: Sender<i32>|async move{
 ///   tx.send(1);
 /// }).await;
-/// println!("{}",r.unwrap()); //1
+/// assert_eq!(r.unwrap(),1);
 /// }
 /// ```
 ///
@@ -50,7 +50,7 @@ pub mod prelude {
 /// #[tokio::main]
 /// async fn main(){
 /// let r = go!(|tx: Sender<String>|async move{
-///     sleep(Duration::from_secs(2));
+///     sleep(Duration::from_secs(2)).await;
 ///     tx.send("whocares".to_string());
 /// },
 /// Context{
@@ -58,7 +58,7 @@ pub mod prelude {
 ///     timeout: Duration::from_secs(1),
 /// }
 /// ).await;
-/// println!("{:?}",r.is_ok());//false
+/// assert_eq!(r.is_ok(),false);
 /// }
 /// ```
 
@@ -79,7 +79,7 @@ macro_rules! go {
     };
     (|$x:ident : Sender<$t:ty>|$y:expr,$c:expr) => {
         async {
-            let (sender, receiver) = channel::<$t>();
+            let (sender, mut receiver) = channel::<$t>();
             init_runtime($c.profile);
             let rts = RUNTIMES.read().unwrap();
             let runtime = rts[$c.profile as usize].as_ref().unwrap();
@@ -89,10 +89,17 @@ macro_rules! go {
                     Ok(v) => Ok(v),
                     Err(_) => Err("unknown error"),
                 },
-                _ => match timeout($c.timeout, receiver).await {
-                    Err(_) => Err("timeout"),
-                    Ok(v) => Ok(v.unwrap()),
-                },
+                _ => {
+                    let mut interval = interval($c.timeout);
+                    tokio::select! {
+                        _=interval.tick()=>Err("timeout"),
+                        msg=&mut receiver =>match msg{
+                            Ok(v)=>Ok(v),
+                            Err(_)=>Err("unknown error")
+                        }
+
+                    }
+                }
             }
         }
     };
