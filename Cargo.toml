@@ -1,6 +1,6 @@
 [package]
 name = "tokio-go"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["chang"]
 description = "a golang like macro: go! (closure) backed by tokio. Supports threadpool dedication."
