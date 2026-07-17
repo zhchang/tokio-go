@@ -1,83 +1,155 @@
 # tokio-go
 
-`tokio-go` provides a compact `go!` macro for running an async closure on a
-reusable, profile-dedicated Tokio runtime. The caller awaits a value sent over
-a Tokio oneshot channel.
+`tokio-go` schedules owned async work immediately on reusable,
+profile-dedicated Tokio runtimes. Its `go!` macro returns a typed `GoTask<T>`
+whose output can be awaited directly.
 
 The crate requires Rust 1.71 or newer.
 
-## Quick start
+## Direct results
 
-The default form uses profile `0` and waits without a timeout. Macro internals
-are hygienic, so `Sender` in the call form does not require the prelude or a
-Tokio import:
+The preferred form returns the async block's value without a user-visible
+channel or type annotation:
 
 ```rust
 use tokio_go::go;
 
 #[tokio::main]
 async fn main() -> Result<(), tokio_go::GoError> {
-    let value = go!(|sender: Sender<i32>| async move {
-        let _ = sender.send(42);
-    })
-    .await?;
+    let input = String::from("owned");
+    let value = go!(async move { format!("{input}-result") }).await?;
 
-    assert_eq!(value, 42);
+    assert_eq!(value, "owned-result");
     Ok(())
 }
 ```
 
-Use `Context` to select one of the 256 runtime profiles and configure how long
-to wait for a result:
+Calls schedule work immediately. Creating several handles starts all their
+tasks before the handles are awaited, whether you later await sequentially or
+use `tokio::join!`:
 
 ```rust
-use std::time::Duration;
-use tokio_go::{go, Context, GoError};
+use tokio_go::go;
 
 #[tokio::main]
-async fn main() {
-    let result = go!(
-        |sender: Sender<()>| async move {
-            std::future::pending::<()>().await;
-            let _ = sender.send(());
-        },
-        Context {
-            profile: 7,
-            timeout: Duration::from_millis(10),
-        }
-    )
-    .await;
+async fn main() -> Result<(), tokio_go::GoError> {
+    let first = go!(async move { 1 });
+    let second = go!(async move { 2 });
+    let (first, second) = tokio::join!(first, second);
 
-    assert_eq!(result, Err(GoError::Timeout));
+    assert_eq!((first?, second?), (1, 2));
+    Ok(())
 }
 ```
 
-Each profile runtime is initialized at most once and reused. A
-`Duration::ZERO` timeout means no deadline. A positive timeout limits only how
-long the caller waits: the spawned task is detached and continues running
-after `GoError::Timeout`.
+## Profiles and timeouts
+
+Use the const builder API or public fields to select one of 256 reusable
+runtime profiles and configure result-waiting:
+
+```rust
+use std::time::Duration;
+use tokio_go::{go, Context};
+
+const BACKGROUND: Context = Context::new()
+    .profile(7)
+    .timeout(Duration::from_secs(1));
+
+#[tokio::main]
+async fn main() -> Result<(), tokio_go::GoError> {
+    let value = go!(async move { 7usize }, BACKGROUND).await?;
+    assert_eq!(value, 7);
+    Ok(())
+}
+```
+
+`Duration::ZERO` means no deadline. A positive timeout limits only how long
+the `GoTask` waits for its result; it never aborts the detached work.
+
+## Detach and cancellation
+
+Dropping `GoTask` detaches it. `detach()` makes that intent explicit and
+reports a synchronous runtime-initialization failure if the task could not be
+started:
+
+```rust
+use tokio_go::go;
+
+# fn example() -> Result<(), tokio_go::GoError> {
+go!(async move {
+    // owned background work
+})
+.detach()?;
+# Ok(())
+# }
+```
+
+`abort(&self)` is the only handle-driven cancellation operation. If abort
+prevents the expected result, awaiting the handle returns
+`GoError::TaskTerminated`. Task panic and other runtime termination can produce
+the same typed error without an explicit abort.
+
+## Ownership boundary
+
+Profile runtimes require task futures and outputs to be `Send + 'static`.
+Move owned values such as `String`, custom structs, and `Arc` into the async
+block. Borrowed caller locals and non-`Send` values such as `Rc` are not
+supported; `tokio-go` does not promise unsafe or scoped borrowed tasks.
+
+## Legacy sender forms
+
+Both 0.2 sender forms remain source compatible and macro-hygienic:
+
+```rust
+use tokio_go::{go, Context};
+
+#[tokio::main]
+async fn main() -> Result<(), tokio_go::GoError> {
+    let default = go!(|sender: Sender<i32>| async move {
+        let _ = sender.send(1);
+    })
+    .await?;
+    let profiled = go!(
+        |sender: Sender<i32>| async move {
+            let _ = sender.send(2);
+        },
+        Context::new().profile(2),
+    )
+    .await?;
+
+    assert_eq!((default, profiled), (1, 2));
+    Ok(())
+}
+```
+
+Legacy work now schedules immediately, and its `GoTask` returns when the
+sender sends even if the spawned task continues afterward.
 
 ## Errors
 
-`go!` returns `Result<T, GoError>`:
+Every form returns `Result<T, GoError>` when awaited:
 
-- `GoError::Timeout` means the configured positive deadline elapsed.
+- `GoError::Timeout` means the positive result-waiting deadline elapsed.
 - `GoError::RuntimeInitialization { .. }` means Tokio could not build the
   selected profile runtime.
-- `GoError::TaskTerminated` means the sender was dropped or the spawned task
-  otherwise ended before sending a value.
+- `GoError::TaskTerminated` means the task did not produce its expected result,
+  including abort, panic, or a legacy sender being dropped.
 
-## Migrating from 0.1 to 0.2
+## Migrating from 0.2 to 0.3
 
-Version 0.2.0 intentionally changes the error type from string literals to
-`GoError`. Code that compares `Err("timeout")` or `Err("unknown error")`
-should match the corresponding enum variant instead. The `go!` invocation
-forms, `Context.profile`, profile-dedicated runtime behavior, and the prelude's
-common imports remain available.
+Version 0.3 adds the preferred direct-result syntax, immediate scheduling,
+`GoTask<T>`, explicit `detach()`/`abort()`, and const `Context` builders. The
+two sender-based forms remain available, but their scheduling is deliberately
+eager: task work begins when `go!` is evaluated instead of when its returned
+future is first polled.
 
-The runtime registry is now private. Code that accessed `prelude::RUNTIMES` or
-called `prelude::init_runtime` must stop doing so; runtimes are initialized
-automatically by `go!`.
+Existing `.await` call sites keep the same `Result<T, GoError>` behavior and
+the existing `GoError::TaskTerminated` display string is unchanged. Code that
+intentionally ignores a returned task should now call `.detach()?` or
+explicitly `drop(task)` to satisfy `GoTask`'s `#[must_use]` contract.
+
+The 0.2 release previously replaced 0.1 string errors with `GoError` and made
+the runtime registry private; those migration requirements remain in effect.
 
 ## License
 
