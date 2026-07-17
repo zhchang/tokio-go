@@ -1,17 +1,18 @@
 [package]
 name = "tokio-go"
-version = "0.1.4"
+version = "0.2.0"
 edition = "2021"
+rust-version = "1.71"
 authors = ["chang"]
-description = "a golang like macro: go! (closure) backed by tokio. Supports threadpool dedication."
+description = "Run async closures on reusable profile-dedicated Tokio runtimes"
 license = "MIT OR Apache-2.0"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+repository = "https://github.com/zhchang/tokio-go"
+readme = "README.md"
+keywords = ["async", "macro", "runtime", "tokio"]
+categories = ["asynchronous", "concurrency"]
 
 [dependencies]
-futures = "0.3.28"
-lazy_static = "1.4.0"
-tokio = { version = "1.29.1", features = ["rt","rt-multi-thread","macros","time","sync"] }
+tokio = { version = "1.53.0", default-features = false, features = ["rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
-tokio-test = "0.4.2"
+tokio = { version = "1.53.0", default-features = false, features = ["macros", "test-util"] }
