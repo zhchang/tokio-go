@@ -135,21 +135,25 @@ Every form returns `Result<T, GoError>` when awaited:
 - `GoError::TaskTerminated` means the task did not produce its expected result,
   including abort, panic, or a legacy sender being dropped.
 
-## Migrating from 0.2 to 0.3
+## Migrating from 0.1.4 to 0.3.0
 
-Version 0.3 adds the preferred direct-result syntax, immediate scheduling,
+Version 0.2.0 was an unpublished development version and was never released to
+crates.io. Public users therefore upgrade directly from 0.1.4 to 0.3.0.
+
+Version 0.3.0 adds the preferred direct-result syntax, immediate scheduling,
 `GoTask<T>`, explicit `detach()`/`abort()`, and const `Context` builders. The
 two sender-based forms remain available, but their scheduling is deliberately
 eager: task work begins when `go!` is evaluated instead of when its returned
 future is first polled.
 
-Existing `.await` call sites keep the same `Result<T, GoError>` behavior and
-the existing `GoError::TaskTerminated` display string is unchanged. Code that
-intentionally ignores a returned task should now call `.detach()?` or
-explicitly `drop(task)` to satisfy `GoTask`'s `#[must_use]` contract.
+Sender-based `.await` call sites remain available, but 0.1.4 string errors are
+replaced by `GoError`. Code that intentionally ignores a returned task should
+now call `.detach()?` or explicitly `drop(task)` to satisfy `GoTask`'s
+`#[must_use]` contract.
 
-The 0.2 release previously replaced 0.1 string errors with `GoError` and made
-the runtime registry private; those migration requirements remain in effect.
+During development, the unpublished 0.2.0 version replaced 0.1 string errors
+with `GoError` and made the runtime registry private. Those changes are part of
+the public 0.1.4-to-0.3.0 migration.
 
 ## License
 
